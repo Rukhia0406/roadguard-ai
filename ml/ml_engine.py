@@ -8,6 +8,7 @@ def _patched_torch_load(*args, **kwargs):
 torch.load = _patched_torch_load
 # -----------------------------------------------------
 
+import argparse
 import cv2
 import json
 import os
@@ -31,13 +32,22 @@ class RoadGuardAI:
             print(f"Error: Video file '{video_path}' not found!")
             return
 
+        output_json_dir = os.path.dirname(os.path.abspath(output_json_path))
+        output_video_dir = os.path.dirname(os.path.abspath(output_video_path))
+        if output_json_dir:
+            os.makedirs(output_json_dir, exist_ok=True)
+        if output_video_dir:
+            os.makedirs(output_video_dir, exist_ok=True)
+
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # FIX: Use 'mp4v' for native Windows OpenCV support without requiring openh264 DLL
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Use a widely compatible codec for Windows and VS Code playback.
+        # mp4v can be unreadable in some players and editors, so AVI + MJPG is more reliable.
+        output_video_path = output_video_path if output_video_path.lower().endswith('.avi') else output_video_path.rsplit('.', 1)[0] + '.avi'
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
         out_video = cv2.VideoWriter(output_video_path, fourcc, fps / self.frame_skip, (width, height))
 
         frame_count = 0
@@ -113,10 +123,25 @@ class RoadGuardAI:
         print(f"2. Saved Video Preview: '{output_video_path}'")
 
 if __name__ == "__main__":
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    video_file = os.path.join(base_dir, 'sample_road_video.mp4')
-    json_output = os.path.join(base_dir, 'detection_outputs.json')
-    video_output = os.path.join(base_dir, 'annotated_output.mp4')
+    parser = argparse.ArgumentParser(description='Run pothole detection on a road video.')
+    parser.add_argument('--video', type=str, help='Path to the input video file. Defaults to ml/sample_road_video.mp4 if it exists.')
+    parser.add_argument('--weights', type=str, default='bharatpothole.pt', help='Model weights name or path.')
+    parser.add_argument('--json-output', type=str, default=None, help='Output JSON path for detections.')
+    parser.add_argument('--video-output', type=str, default=None, help='Output annotated video path.')
+    parser.add_argument('--frame-skip', type=int, default=3, help='Process every Nth frame.')
+    args = parser.parse_args()
 
-    engine = RoadGuardAI(weights_name='bharatpothole.pt')
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    default_video = os.path.join(base_dir, 'sample_road_video.mp4')
+    video_file = args.video if args.video else default_video
+
+    if not os.path.exists(video_file):
+        print(f"No video file found at '{video_file}'.")
+        print("Usage: python ml_engine.py --video path/to/video.mp4")
+        raise SystemExit(1)
+
+    json_output = args.json_output if args.json_output else os.path.join(base_dir, 'detection_outputs.json')
+    video_output = args.video_output if args.video_output else os.path.join(base_dir, 'annotated_output.mp4')
+
+    engine = RoadGuardAI(weights_name=args.weights, frame_skip=args.frame_skip)
     engine.process_video(video_file, json_output, video_output)
